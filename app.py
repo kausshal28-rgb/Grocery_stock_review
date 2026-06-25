@@ -55,45 +55,71 @@ if submit_button and new_name:
         st.rerun()
 
 # --- MAIN DASHBOARD ---
-st.subheader("📋 Current Inventory")
-
 if df.empty:
+    st.subheader("📋 Current Inventory")
     st.info("Your pantry is completely empty! Add items using the sidebar.")
 else:
-    # Status calculation
+    # Always pre-calculate the Status before displaying any window/tab
     df["Status"] = df.apply(lambda row: "🔴 Out of Stock" if row["Quantity"] == 0 else ("🟡 Low Stock" if row["Quantity"] <= row["Min Threshold"] else "🟢 In Stock"), axis=1)
     
-    # Metrics
-    low_stock_count = df[df["Quantity"] <= df["Min Threshold"]].shape[0]
+    # Top Metrics Bar
+    out_stock_count = df[df["Quantity"] == 0].shape[0]
+    low_stock_count = df[(df["Quantity"] <= df["Min Threshold"]) & (df["Quantity"] > 0)].shape[0]
     total_items = df.shape[0]
     
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     c1.metric("Total Unique Items", total_items)
-    c2.metric("Items to Restock", low_stock_count, delta_color="inverse")
+    c2.metric("🟡 Low Stock Items", low_stock_count)
+    c3.metric("🔴 Out of Stock", out_stock_count, delta_color="inverse")
     
-    st.write("### Manage quantities below:")
-    
-    # Interactive Table Configuration
-    edited_df = st.data_editor(
-        df, 
-        disabled=["Item Name", "Category", "Status"], 
-        column_config={
-            "Unit": st.column_config.SelectboxColumn(
-                "Unit",
-                options=["EA", "gram", "Kg", "Litre"],
-                required=True,
-            ),
-            "Min Threshold": st.column_config.NumberColumn(
-                "Min Threshold",
-                help="Low stock alert limit"
+    st.write("---")
+
+    # --- CREATING THE WINDOWS / TABS ---
+    tab_all, tab_filter = st.tabs(["📋 View & Edit Full Inventory", "🔍 Filter Items by Status"])
+
+    # WINDOW 1: Full Inventory Management
+    with tab_all:
+        st.write("### Complete Pantry Registry")
+        edited_df = st.data_editor(
+            df, 
+            disabled=["Item Name", "Category", "Status"], 
+            column_config={
+                "Unit": st.column_config.SelectboxColumn(
+                    "Unit", options=["EA", "gram", "Kg", "Litre"], required=True
+                )
+            },
+            use_container_width=True,
+            key="full_inventory_editor"
+        )
+        
+        if not edited_df.equals(df):
+            save_df = edited_df.drop(columns=["Status"])
+            save_data(save_df)
+            st.success("Inventory updated!")
+            st.rerun()
+
+    # WINDOW 2: Status Filter Window
+    with tab_filter:
+        st.write("### Quick Shopping & Health Check Lists")
+        
+        # User dropdown to filter down items
+        status_choice = st.selectbox(
+            "Select Status to View:", 
+            ["Show All Warnings (Low & Out of Stock)", "🔴 Out of Stock", "🟡 Low Stock", "🟢 In Stock"]
+        )
+        
+        # Apply the selected filter to data
+        if status_choice == "Show All Warnings (Low & Out of Stock)":
+            filtered_df = df[df["Status"].isin(["🔴 Out of Stock", "🟡 Low Stock"])]
+        else:
+            filtered_df = df[df["Status"] == status_choice]
+            
+        # Display the filtered items
+        if filtered_df.empty:
+            st.success(f"No items match the status: **{status_choice}** 🎉")
+        else:
+            st.dataframe(
+                filtered_df[["Status", "Item Name", "Category", "Quantity", "Unit", "Min Threshold"]],
+                use_container_width=True,
+                hide_index=True
             )
-        },
-        use_container_width=True,
-        num_rows="dynamic"
-    )
-    
-    if not edited_df.equals(df):
-        save_df = edited_df.drop(columns=["Status"])
-        save_data(save_df)
-        st.success("Inventory updated!")
-        st.rerun()
