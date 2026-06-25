@@ -1,13 +1,15 @@
 import streamlit as st
 import pandas as pd
 import os
+import json
 import difflib
 
 # Configuration and File Setup
 DB_FILE = "grocery_inventory.csv"
+CAT_FILE = "grocery_categories.json"
 
-# Comprehensive Indian Grocery Dictionary mapping Categories to Items
-INDIAN_GROCERY_DATA = {
+# Default Initial Dictionary
+DEFAULT_GROCERY_DATA = {
     "Staples & Flours": [
         "Wheat Atta", "Basmati Rice", "Regular Rice", "Idli Rice", 
         "Dalia (Broken Wheat)", "Oats", "Sooji (Rava)", "Poha", 
@@ -48,10 +50,25 @@ INDIAN_GROCERY_DATA = {
     "Other": []
 }
 
+# Load or Initialize Categories JSON
+if not os.path.exists(CAT_FILE):
+    with open(CAT_FILE, "w") as f:
+        json.dump(DEFAULT_GROCERY_DATA, f, indent=4)
+
+def load_categories():
+    with open(CAT_FILE, "r") as f:
+        return json.load(f)
+
+def save_categories(data):
+    with open(CAT_FILE, "w") as f:
+        json.dump(data, f, indent=4)
+
+# Load current state of categories and items
+INDIAN_GROCERY_DATA = load_categories()
 CATEGORIES = list(INDIAN_GROCERY_DATA.keys())
 UNITS = ["EA", "gram", "g", "Kg", "kg", "Litre", "litres", "ml", "bottle", "multipack", "packet", "pieces", "pack", "refills"]
 
-# Flatten out all standard items into a single unique list for the dropdown search
+# Flatten out all standard items dynamically
 ALL_STANDARD_ITEMS = ["-- Add Custom Item --"] + sorted(list({item for items in INDIAN_GROCERY_DATA.values() for item in items}))
 
 # Initialize CSV file if it doesn't exist
@@ -82,11 +99,9 @@ with st.sidebar.form(key="add_form", clear_on_submit=True):
     # Conditional field if user wants a custom item name
     if selected_item == "-- Add Custom Item --":
         new_name = st.text_input("Type Custom Item Name:")
-        # Default category to 'Other' for custom entries
         default_cat_idx = CATEGORIES.index("Other")
     else:
         new_name = selected_item
-        # Automatically detect the correct category for standard items
         detected_cat = "Other"
         for cat, items in INDIAN_GROCERY_DATA.items():
             if selected_item in items:
@@ -102,14 +117,14 @@ with st.sidebar.form(key="add_form", clear_on_submit=True):
     new_unit = col_unit.selectbox("Unit", UNITS)
     
     # Alert Threshold layout
-    new_min = st.sidebar.number_input(f"Alert Threshold ({new_unit})", min_value=0.0, value=0.0, step=0.5, format="%.1f",
-                                      help="Triggers a 'Low Stock' alert when inventory drops to or below this number.")
+    new_min = st.sidebar.number_input(f"Alert Threshold ({new_unit})", min_value=0.0, value=0.0, step=0.5, format="%.1f")
     
     submit_button = st.form_submit_button(label="Add Item")
 
-# Handle Duplicate & Fuzzy Name Matching on Submission
+# Handle Submission, Duplicate Prevention, and Dynamic Dictionary Updating
 if submit_button and new_name:
-    cleaned_name = new_name.strip()
+    # Formatting input nicely (Capitalizing first letter of words)
+    cleaned_name = new_name.strip().title()
     existing_items = df["Item Name"].tolist()
     
     # Strict Duplicate Check
@@ -126,6 +141,18 @@ if submit_button and new_name:
             st.session_state["override_item"] = cleaned_name
         else:
             st.session_state["override_item"] = ""
+            
+            # --- DYNAMIC UPDATE LOGIC ---
+            # If it was a custom item, automatically add it permanently to the selected category list!
+            if selected_item == "-- Add Custom Item --":
+                # Double-check it doesn't already live inside the master structural dictionary
+                flat_master_list = [item.lower() for items in INDIAN_GROCERY_DATA.values() for item in items]
+                if cleaned_name.lower() not in flat_master_list:
+                    INDIAN_GROCERY_DATA[new_cat].append(cleaned_name)
+                    save_categories(INDIAN_GROCERY_DATA)
+                    st.sidebar.info(f"💡 '{cleaned_name}' added to standard dropdown library!")
+
+            # Save item to inventory database
             new_row = pd.DataFrame([[cleaned_name, new_cat, new_qty, new_unit, new_min]], columns=df.columns)
             df = pd.concat([df, new_row], ignore_index=True)
             save_data(df)
@@ -159,7 +186,7 @@ else:
         "🗂️ Filter by Category"
     ])
 
-    # TAB 1: Full Inventory Management Window (Supports editing and deleting)
+    # TAB 1: Full Inventory Management Window
     with tab_all:
         st.write("### Complete Pantry Registry")
         st.caption("💡 **To Delete an Item:** Click the blank square box on the far left of the item's row to highlight it, then press the **Delete** key on your keyboard.")
