@@ -5,16 +5,54 @@ import difflib
 
 # Configuration and File Setup
 DB_FILE = "grocery_inventory.csv"
-CATEGORIES = ["Staples", "Dairy", "Produce", "Snacks", "Frozen", "Other"]
-UNITS = ["EA", "gram", "Kg", "Litre"]
 
-# Pre-defined list of common household groceries to standardize selection
-STANDARD_ITEMS = [
-    "-- Add Custom Item --",
-    "Apple", "Banana", "Bread", "Butter", "Cheese", "Chicken", "Coffee", 
-    "Eggs", "Flour", "Garlic", "Milk", "Onion", "Potato", "Rice", 
-    "Salt", "Sugar", "Tea", "Tomato", "Yogurt"
-]
+# Comprehensive Indian Grocery Dictionary mapping Categories to Items
+INDIAN_GROCERY_DATA = {
+    "Staples & Flours": [
+        "Wheat Atta", "Basmati Rice", "Regular Rice", "Idli Rice", 
+        "Dalia (Broken Wheat)", "Oats", "Sooji (Rava)", "Poha", 
+        "Besan (Gram Flour)", "Maida", "Ragi Flour"
+    ],
+    "Dals & Pulses": [
+        "Toor Dal", "Moong Dal", "Masoor Dal", "Urad Dal", "Chana Dal", 
+        "Rajma (Kidney Beans)", "Kabuli Chana", "Kala Chana", 
+        "Sabut Moong", "Lobia (Black Eyed Peas)"
+    ],
+    "Spices & Masalas": [
+        "Jeera (Cumin Seeds)", "Rai (Mustard Seeds)", "Dhaniya (Coriander Seeds)", 
+        "Saunf (Fennel Seeds)", "Methi (Fenugreek Seeds)", "Haldi (Turmeric Powder)", 
+        "Red Chilli Powder", "Garam Masala", "Hing (Asafoetida)", "Dalchini (Cinnamon)", 
+        "Lavang (Cloves)", "Elaichi (Cardamom)", "Tej Patta (Bay Leaves)", "Salt", "Amchur Powder"
+    ],
+    "Oils & Sweeteners": [
+        "Cooking Oil", "Ghee", "Sugar", "Jaggery (Gud)", "Tamarind (Imli)"
+    ],
+    "Dry Fruits & Seeds": [
+        "Almonds (Badam)", "Cashews (Kaju)", "Raisins (Kishmish)", 
+        "Peanuts (Moongfali)", "Sesame Seeds (Til)"
+    ],
+    "Breakfast & Packaged": [
+        "Tea", "Coffee", "Tomato Ketchup", "Soy Sauce", 
+        "Vermicelli (Semiya)", "Instant Noodles", "Papad", "Soya Chunks"
+    ],
+    "Dairy & Frozen": [
+        "Milk", "Curd", "Butter", "Paneer", "Frozen Peas", "Frozen Corn"
+    ],
+    "Household & Cleaning": [
+        "Detergent Powder", "Fabric Conditioner", "Dishwash Liquid", 
+        "Scrubber Pads", "Floor Cleaner", "Toilet Cleaner", "Garbage Bags", "Mosquito Repellent"
+    ],
+    "Personal Care": [
+        "Bathing Soap", "Shampoo", "Toothpaste", "Toothbrushes"
+    ],
+    "Other": []
+}
+
+CATEGORIES = list(INDIAN_GROCERY_DATA.keys())
+UNITS = ["EA", "gram", "g", "Kg", "kg", "Litre", "litres", "ml", "bottle", "multipack", "packet", "pieces", "pack", "refills"]
+
+# Flatten out all standard items into a single unique list for the dropdown search
+ALL_STANDARD_ITEMS = ["-- Add Custom Item --"] + sorted(list({item for items in INDIAN_GROCERY_DATA.values() for item in items}))
 
 # Initialize CSV file if it doesn't exist
 if not os.path.exists(DB_FILE):
@@ -28,38 +66,43 @@ def save_data(df):
     df.to_csv(DB_FILE, index=False)
 
 # Streamlit Page UI Styling
-st.set_page_config(page_title="Home Grocery Manager", layout="wide")
-st.title("🍏 Home Grocery Inventory Manager")
+st.set_page_config(page_title="Indian Grocery Inventory Manager", layout="wide")
+st.title("🇮🇳 Home Grocery Inventory Manager")
 
 # Load existing inventory
 df = load_data()
-
-# Ensure older CSV files don't crash if they miss the 'Unit' column
-if "Unit" not in df.columns and not df.empty:
-    df.insert(3, "Unit", "EA")
 
 # --- SIDEBAR: Add New Items ---
 st.sidebar.header("➕ Add New Item")
 with st.sidebar.form(key="add_form", clear_on_submit=True):
     
-    # 1. Standardized Dropdown Selection
-    selected_item = st.selectbox("Select Item Name", STANDARD_ITEMS)
+    # Standardized Searchable Dropdown
+    selected_item = st.selectbox("Select Item Name", ALL_STANDARD_ITEMS)
     
-    # 2. Conditional text field if custom item is chosen
+    # Conditional field if user wants a custom item name
     if selected_item == "-- Add Custom Item --":
         new_name = st.text_input("Type Custom Item Name:")
+        # Default category to 'Other' for custom entries
+        default_cat_idx = CATEGORIES.index("Other")
     else:
         new_name = selected_item
+        # Automatically detect the correct category for standard items
+        detected_cat = "Other"
+        for cat, items in INDIAN_GROCERY_DATA.items():
+            if selected_item in items:
+                detected_cat = cat
+                break
+        default_cat_idx = CATEGORIES.index(detected_cat)
 
-    new_cat = st.selectbox("Category", CATEGORIES)
+    new_cat = st.selectbox("Category", CATEGORIES, index=default_cat_idx)
     
-    # Unit Selection layout for Current Stock
+    # Unit & Quantity Layout
     col_qty, col_unit = st.sidebar.columns([2, 1])
-    new_qty = col_qty.number_input("Current Quantity", min_value=0, value=1, step=1)
+    new_qty = col_qty.number_input("Current Quantity", min_value=0.0, value=1.0, step=0.5, format="%.1f")
     new_unit = col_unit.selectbox("Unit", UNITS)
     
     # Alert Threshold layout
-    new_min = st.sidebar.number_input(f"Alert Threshold ({new_unit})", min_value=0, value=2, step=1, 
+    new_min = st.sidebar.number_input(f"Alert Threshold ({new_unit})", min_value=0.0, value=0.0, step=0.5, format="%.1f",
                                       help="Triggers a 'Low Stock' alert when inventory drops to or below this number.")
     
     submit_button = st.form_submit_button(label="Add Item")
@@ -69,12 +112,12 @@ if submit_button and new_name:
     cleaned_name = new_name.strip()
     existing_items = df["Item Name"].tolist()
     
-    # Strict Duplicate Check (Case-insensitive)
+    # Strict Duplicate Check
     if cleaned_name.lower() in [item.lower() for item in existing_items]:
         st.sidebar.error(f"🚨 '{cleaned_name}' already exists in your inventory!")
         
     else:
-        # Smart Fuzzy Match Check (75% similarity threshold)
+        # Fuzzy Match Check
         close_matches = difflib.get_close_matches(cleaned_name, existing_items, n=1, cutoff=0.75)
         
         if close_matches and st.session_state.get("override_item") != cleaned_name:
@@ -95,7 +138,7 @@ if df.empty:
     st.info("Your pantry is completely empty! Add items using the sidebar.")
 else:
     # Pre-calculate Status
-    df["Status"] = df.apply(lambda row: "🔴 Out of Stock" if row["Quantity"] == 0 else ("🟡 Low Stock" if row["Quantity"] <= row["Min Threshold"] else "🟢 In Stock"), axis=1)
+    df["Status"] = df.apply(lambda row: "🔴 Out of Stock" if float(row["Quantity"]) == 0 else ("🟡 Low Stock" if float(row["Quantity"]) <= float(row["Min Threshold"]) else "🟢 In Stock"), axis=1)
     
     # Top Metrics Bar
     out_stock_count = df[df["Quantity"] == 0].shape[0]
@@ -123,19 +166,19 @@ else:
         
         edited_df = st.data_editor(
             df, 
-            disabled=["Status"],  # Allow changing Item Name/Category directly in table if needed
+            disabled=["Status"],
             column_config={
+                "Quantity": st.column_config.NumberColumn("Quantity", step=0.1, format="%.1f"),
+                "Min Threshold": st.column_config.NumberColumn("Min Threshold", step=0.1, format="%.1f"),
                 "Unit": st.column_config.SelectboxColumn("Unit", options=UNITS, required=True),
                 "Category": st.column_config.SelectboxColumn("Category", options=CATEGORIES, required=True)
             },
             use_container_width=True,
-            num_rows="dynamic",  # THIS ENABLES ROW DELETION
+            num_rows="dynamic",
             key="full_inventory_editor"
         )
         
-        # Check if user added, edited, or deleted rows
         if not edited_df.equals(df):
-            # Strip out calculated Status column before syncing to CSV
             if "Status" in edited_df.columns:
                 save_df = edited_df.drop(columns=["Status"])
             else:
