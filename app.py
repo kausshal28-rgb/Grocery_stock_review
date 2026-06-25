@@ -4,6 +4,8 @@ import os
 
 # Configuration and File Setup
 DB_FILE = "grocery_inventory.csv"
+CATEGORIES = ["Staples", "Dairy", "Produce", "Snacks", "Frozen", "Other"]
+UNITS = ["EA", "gram", "Kg", "Litre"]
 
 # Initialize CSV file if it doesn't exist
 if not os.path.exists(DB_FILE):
@@ -31,12 +33,12 @@ if "Unit" not in df.columns and not df.empty:
 st.sidebar.header("➕ Add New Item")
 with st.sidebar.form(key="add_form", clear_on_submit=True):
     new_name = st.text_input("Item Name (e.g., Milk, Rice)")
-    new_cat = st.selectbox("Category", ["Staples", "Dairy", "Produce", "Snacks", "Frozen", "Other"])
+    new_cat = st.selectbox("Category", CATEGORIES)
     
     # Unit Selection layout for Current Stock
     col_qty, col_unit = st.sidebar.columns([2, 1])
     new_qty = col_qty.number_input("Current Quantity", min_value=0, value=1, step=1)
-    new_unit = col_unit.selectbox("Unit", ["EA", "gram", "Kg", "Litre"])
+    new_unit = col_unit.selectbox("Unit", UNITS)
     
     # Alert Threshold layout (dynamically displays the chosen unit label)
     new_min = st.sidebar.number_input(f"Alert Threshold ({new_unit})", min_value=0, value=2, step=1, 
@@ -59,7 +61,7 @@ if df.empty:
     st.subheader("📋 Current Inventory")
     st.info("Your pantry is completely empty! Add items using the sidebar.")
 else:
-    # Always pre-calculate the Status before displaying any window/tab
+    # Always pre-calculate the Status before displaying tabs
     df["Status"] = df.apply(lambda row: "🔴 Out of Stock" if row["Quantity"] == 0 else ("🟡 Low Stock" if row["Quantity"] <= row["Min Threshold"] else "🟢 In Stock"), axis=1)
     
     # Top Metrics Bar
@@ -74,19 +76,21 @@ else:
     
     st.write("---")
 
-    # --- CREATING THE WINDOWS / TABS ---
-    tab_all, tab_filter = st.tabs(["📋 View & Edit Full Inventory", "🔍 Filter Items by Status"])
+    # --- CREATING THE THREE WINDOWS / TABS ---
+    tab_all, tab_status, tab_category = st.tabs([
+        "📋 Full Inventory", 
+        "🔍 Filter by Status", 
+        "🗂️ Filter by Category"
+    ])
 
-    # WINDOW 1: Full Inventory Management
+    # TAB 1: Full Inventory Management
     with tab_all:
         st.write("### Complete Pantry Registry")
         edited_df = st.data_editor(
             df, 
             disabled=["Item Name", "Category", "Status"], 
             column_config={
-                "Unit": st.column_config.SelectboxColumn(
-                    "Unit", options=["EA", "gram", "Kg", "Litre"], required=True
-                )
+                "Unit": st.column_config.SelectboxColumn("Unit", options=UNITS, required=True)
             },
             use_container_width=True,
             key="full_inventory_editor"
@@ -98,28 +102,48 @@ else:
             st.success("Inventory updated!")
             st.rerun()
 
-    # WINDOW 2: Status Filter Window
-    with tab_filter:
+    # TAB 2: Status Filter Window
+    with tab_status:
         st.write("### Quick Shopping & Health Check Lists")
-        
-        # User dropdown to filter down items
         status_choice = st.selectbox(
             "Select Status to View:", 
-            ["Show All Warnings (Low & Out of Stock)", "🔴 Out of Stock", "🟡 Low Stock", "🟢 In Stock"]
+            ["Show All Warnings (Low & Out of Stock)", "🔴 Out of Stock", "🟡 Low Stock", "🟢 In Stock"],
+            key="status_filter_dropdown"
         )
         
-        # Apply the selected filter to data
         if status_choice == "Show All Warnings (Low & Out of Stock)":
-            filtered_df = df[df["Status"].isin(["🔴 Out of Stock", "🟡 Low Stock"])]
+            filtered_status_df = df[df["Status"].isin(["🔴 Out of Stock", "🟡 Low Stock"])]
         else:
-            filtered_df = df[df["Status"] == status_choice]
+            filtered_status_df = df[df["Status"] == status_choice]
             
-        # Display the filtered items
-        if filtered_df.empty:
+        if filtered_status_df.empty:
             st.success(f"No items match the status: **{status_choice}** 🎉")
         else:
             st.dataframe(
-                filtered_df[["Status", "Item Name", "Category", "Quantity", "Unit", "Min Threshold"]],
+                filtered_status_df[["Status", "Item Name", "Category", "Quantity", "Unit", "Min Threshold"]],
+                use_container_width=True,
+                hide_index=True
+            )
+
+    # TAB 3: Category Filter Window
+    with tab_category:
+        st.write("### View Inventory by Kitchen Section")
+        
+        # User dropdown to choose category
+        category_choice = st.selectbox(
+            "Select Kitchen Category to View:", 
+            CATEGORIES,
+            key="category_filter_dropdown"
+        )
+        
+        # Filter down items matching category
+        filtered_cat_df = df[df["Category"] == category_choice]
+        
+        if filtered_cat_df.empty:
+            st.info(f"You don't have any items registered under **{category_choice}** yet.")
+        else:
+            st.dataframe(
+                filtered_cat_df[["Status", "Item Name", "Quantity", "Unit", "Min Threshold"]],
                 use_container_width=True,
                 hide_index=True
             )
