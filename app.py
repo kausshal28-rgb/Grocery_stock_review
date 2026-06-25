@@ -5,7 +5,7 @@ import os
 # Configuration and File Setup
 DB_FILE = "grocery_inventory.csv"
 
-# Initialize CSV file if it doesn't exist (Now including the 'Unit' column)
+# Initialize CSV file if it doesn't exist
 if not os.path.exists(DB_FILE):
     df = pd.DataFrame(columns=["Item Name", "Category", "Quantity", "Unit", "Min Threshold"])
     df.to_csv(DB_FILE, index=False)
@@ -25,7 +25,7 @@ df = load_data()
 
 # Ensure older CSV files don't crash if they miss the 'Unit' column
 if "Unit" not in df.columns and not df.empty:
-    df.insert(3, "Unit", "EA") # Default existing items to 'EA'
+    df.insert(3, "Unit", "EA")
 
 # --- SIDEBAR: Add New Items ---
 st.sidebar.header("➕ Add New Item")
@@ -33,12 +33,14 @@ with st.sidebar.form(key="add_form", clear_on_submit=True):
     new_name = st.text_input("Item Name (e.g., Milk, Rice)")
     new_cat = st.selectbox("Category", ["Staples", "Dairy", "Produce", "Snacks", "Frozen", "Other"])
     
-    # Unit Selection layout
+    # Unit Selection layout for Current Stock
     col_qty, col_unit = st.sidebar.columns([2, 1])
-    new_qty = col_qty.number_input("Quantity", min_value=0, value=1, step=1)
+    new_qty = col_qty.number_input("Current Quantity", min_value=0, value=1, step=1)
     new_unit = col_unit.selectbox("Unit", ["EA", "gram", "Kg", "Litre"])
     
-    new_min = st.number_input("Alert Threshold (Low Stock level)", min_value=0, value=2, step=1)
+    # Alert Threshold layout (dynamically displays the chosen unit label)
+    new_min = st.sidebar.number_input(f"Alert Threshold ({new_unit})", min_value=0, value=2, step=1, 
+                                      help="Triggers a 'Low Stock' alert when inventory drops to or below this number.")
     
     submit_button = st.form_submit_button(label="Add Item")
 
@@ -76,11 +78,14 @@ else:
         df, 
         disabled=["Item Name", "Category", "Status"], 
         column_config={
-            # Turning the Unit column into a dropdown inside the main table too!
             "Unit": st.column_config.SelectboxColumn(
                 "Unit",
                 options=["EA", "gram", "Kg", "Litre"],
                 required=True,
+            ),
+            "Min Threshold": st.column_config.NumberColumn(
+                "Min Threshold",
+                help="Low stock alert limit"
             )
         },
         use_container_width=True,
