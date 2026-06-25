@@ -1,11 +1,20 @@
 import streamlit as st
 import pandas as pd
 import os
+import difflib
 
 # Configuration and File Setup
 DB_FILE = "grocery_inventory.csv"
 CATEGORIES = ["Staples", "Dairy", "Produce", "Snacks", "Frozen", "Other"]
 UNITS = ["EA", "gram", "Kg", "Litre"]
+
+# Pre-defined list of common household groceries to standardize selection
+STANDARD_ITEMS = [
+    "-- Add Custom Item --",
+    "Apple", "Banana", "Bread", "Butter", "Cheese", "Chicken", "Coffee", 
+    "Eggs", "Flour", "Garlic", "Milk", "Onion", "Potato", "Rice", 
+    "Salt", "Sugar", "Tea", "Tomato", "Yogurt"
+]
 
 # Initialize CSV file if it doesn't exist
 if not os.path.exists(DB_FILE):
@@ -32,7 +41,16 @@ if "Unit" not in df.columns and not df.empty:
 # --- SIDEBAR: Add New Items ---
 st.sidebar.header("➕ Add New Item")
 with st.sidebar.form(key="add_form", clear_on_submit=True):
-    new_name = st.text_input("Item Name (e.g., Milk, Rice)")
+    
+    # 1. Standardized Dropdown Selection
+    selected_item = st.selectbox("Select Item Name", STANDARD_ITEMS)
+    
+    # 2. Conditional text field if custom item is chosen
+    if selected_item == "-- Add Custom Item --":
+        new_name = st.text_input("Type Custom Item Name:")
+    else:
+        new_name = selected_item
+
     new_cat = st.selectbox("Category", CATEGORIES)
     
     # Unit Selection layout for Current Stock
@@ -40,28 +58,43 @@ with st.sidebar.form(key="add_form", clear_on_submit=True):
     new_qty = col_qty.number_input("Current Quantity", min_value=0, value=1, step=1)
     new_unit = col_unit.selectbox("Unit", UNITS)
     
-    # Alert Threshold layout (dynamically displays the chosen unit label)
+    # Alert Threshold layout
     new_min = st.sidebar.number_input(f"Alert Threshold ({new_unit})", min_value=0, value=2, step=1, 
                                       help="Triggers a 'Low Stock' alert when inventory drops to or below this number.")
     
     submit_button = st.form_submit_button(label="Add Item")
 
+# Handle Duplicate & Fuzzy Name Matching on Submission
 if submit_button and new_name:
-    if new_name.strip().lower() in df["Item Name"].str.lower().values:
-        st.sidebar.error(f"'{new_name}' already exists!")
+    cleaned_name = new_name.strip()
+    existing_items = df["Item Name"].tolist()
+    
+    # Strict Duplicate Check (Case-insensitive)
+    if cleaned_name.lower() in [item.lower() for item in existing_items]:
+        st.sidebar.error(f"🚨 '{cleaned_name}' already exists in your inventory!")
+        
     else:
-        new_row = pd.DataFrame([[new_name.strip(), new_cat, new_qty, new_unit, new_min]], columns=df.columns)
-        df = pd.concat([df, new_row], ignore_index=True)
-        save_data(df)
-        st.sidebar.success(f"Added {new_name} successfully!")
-        st.rerun()
+        # Smart Fuzzy Match Check (75% similarity threshold)
+        close_matches = difflib.get_close_matches(cleaned_name, existing_items, n=1, cutoff=0.75)
+        
+        if close_matches and st.session_state.get("override_item") != cleaned_name:
+            st.sidebar.warning(f"🤔 Did you mean **{close_matches[0]}**?")
+            st.sidebar.info("If this is a completely different item, click 'Add Item' again to force add it.")
+            st.session_state["override_item"] = cleaned_name
+        else:
+            st.session_state["override_item"] = ""
+            new_row = pd.DataFrame([[cleaned_name, new_cat, new_qty, new_unit, new_min]], columns=df.columns)
+            df = pd.concat([df, new_row], ignore_index=True)
+            save_data(df)
+            st.sidebar.success(f"Added {cleaned_name} successfully!")
+            st.rerun()
 
 # --- MAIN DASHBOARD ---
 if df.empty:
     st.subheader("📋 Current Inventory")
     st.info("Your pantry is completely empty! Add items using the sidebar.")
 else:
-    # Always pre-calculate the Status before displaying tabs
+    # Pre-calculate Status
     df["Status"] = df.apply(lambda row: "🔴 Out of Stock" if row["Quantity"] == 0 else ("🟡 Low Stock" if row["Quantity"] <= row["Min Threshold"] else "🟢 In Stock"), axis=1)
     
     # Top Metrics Bar
@@ -76,30 +109,39 @@ else:
     
     st.write("---")
 
-    # --- CREATING THE THREE WINDOWS / TABS ---
+    # --- THREE WINDOWS / TABS ---
     tab_all, tab_status, tab_category = st.tabs([
-        "📋 Full Inventory", 
+        "📋 Full Inventory & Deletion", 
         "🔍 Filter by Status", 
         "🗂️ Filter by Category"
     ])
 
-    # TAB 1: Full Inventory Management
+    # TAB 1: Full Inventory Management Window (Supports editing and deleting)
     with tab_all:
         st.write("### Complete Pantry Registry")
+        st.caption("💡 **To Delete an Item:** Click the blank square box on the far left of the item's row to highlight it, then press the **Delete** key on your keyboard.")
+        
         edited_df = st.data_editor(
             df, 
-            disabled=["Item Name", "Category", "Status"], 
+            disabled=["Status"],  # Allow changing Item Name/Category directly in table if needed
             column_config={
-                "Unit": st.column_config.SelectboxColumn("Unit", options=UNITS, required=True)
+                "Unit": st.column_config.SelectboxColumn("Unit", options=UNITS, required=True),
+                "Category": st.column_config.SelectboxColumn("Category", options=CATEGORIES, required=True)
             },
             use_container_width=True,
+            num_rows="dynamic",  # THIS ENABLES ROW DELETION
             key="full_inventory_editor"
         )
         
+        # Check if user added, edited, or deleted rows
         if not edited_df.equals(df):
-            save_df = edited_df.drop(columns=["Status"])
+            # Strip out calculated Status column before syncing to CSV
+            if "Status" in edited_df.columns:
+                save_df = edited_df.drop(columns=["Status"])
+            else:
+                save_df = edited_df
             save_data(save_df)
-            st.success("Inventory updated!")
+            st.success("Inventory changes saved successfully!")
             st.rerun()
 
     # TAB 2: Status Filter Window
@@ -128,15 +170,12 @@ else:
     # TAB 3: Category Filter Window
     with tab_category:
         st.write("### View Inventory by Kitchen Section")
-        
-        # User dropdown to choose category
         category_choice = st.selectbox(
             "Select Kitchen Category to View:", 
             CATEGORIES,
             key="category_filter_dropdown"
         )
         
-        # Filter down items matching category
         filtered_cat_df = df[df["Category"] == category_choice]
         
         if filtered_cat_df.empty:
